@@ -39,6 +39,7 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.KtScript
+import org.jetbrains.kotlin.scripting.compiler.plugin.fir.replCompletionModeComponent
 import org.jetbrains.kotlin.scripting.definitions.ScriptPriorities
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
@@ -71,6 +72,28 @@ class FirReplSnippetConfiguratorExtensionImpl(
         val configuration = getOrLoadConfiguration(session, sourceFile!!)?.valueOrNull() ?: run {
             // TODO: add error or log, if necessary (see implementation for scripts) (KT-74742)
             return
+        }
+
+        // Unlike regular scripts, REPL snippets do not synthesize base-class constructor arguments, so later lowerings
+        // cannot materialize a base class that requires them (e.g. the default ScriptTemplateWithArgs). Therefore the
+        // base class is turned into a snippet receiver only in the stateless completion/analysis frontend (marked by
+        // FirReplCompletionModeComponent), where no codegen runs but completion needs to resolve base-class members.
+        if (session.replCompletionModeComponent != null) {
+            configuration.getNoDefault(ScriptCompilationConfiguration.baseClass)?.let { baseClass ->
+                receivers.add(
+                    buildScriptReceiverParameter {
+                        typeRef = tryResolveOrBuildParameterTypeRefFromKotlinType(
+                            baseClass,
+                            this@configure.source.fakeElement(KtFakeSourceElementKind.ScriptBaseClass),
+                        )
+                        isBaseClassReceiver = true
+                        symbol = FirReceiverParameterSymbol()
+                        moduleData = session.moduleData
+                        origin = FirDeclarationOrigin.ScriptCustomization.ParameterFromBaseClass
+                        containingDeclarationSymbol = this@configure.symbol
+                    }
+                )
+            }
         }
 
         configuration[ScriptCompilationConfiguration.implicitReceivers]?.forEachIndexed { index, implicitReceiver ->

@@ -48,6 +48,15 @@ class FirReplHistoryProviderImpl : FirReplHistoryProvider() {
     override fun isFirstSnippet(symbol: FirReplSnippetSymbol): Boolean = history.firstOrNull() == symbol
 
     override fun getSnippetCount(): Int = history.size
+
+    fun snapshotSize(): Int = history.size
+
+    fun restoreToSize(size: Int) {
+        if (history.size <= size) return
+        val kept = history.take(size)
+        history.clear()
+        history.addAll(kept)
+    }
 }
 
 class FirReplSnippetResolveExtensionImpl(

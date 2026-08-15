@@ -118,17 +118,35 @@ class K2ReplCompiler(
                 }
         ): K2ReplCompilationState {
 
+            val effectiveHostConfiguration =
+                if (hostConfiguration[ScriptingHostConfiguration.repl.isReplSnippetSource] != null &&
+                    hostConfiguration[ScriptingHostConfiguration.repl.firReplHistoryProvider] != null
+                ) {
+                    hostConfiguration
+                } else {
+                    hostConfiguration.with {
+                        repl {
+                            if (hostConfiguration[ScriptingHostConfiguration.repl.isReplSnippetSource] == null) {
+                                isReplSnippetSource { _, _ -> true }
+                            }
+                            if (hostConfiguration[ScriptingHostConfiguration.repl.firReplHistoryProvider] == null) {
+                                firReplHistoryProvider(FirReplHistoryProviderImpl())
+                            }
+                        }
+                    }
+                }
+
             val moduleName = Name.special("<REPL>")
             val compilerContext = createIsolatedCompilationContext(
                 scriptCompilationConfiguration,
-                hostConfiguration,
+                effectiveHostConfiguration,
                 messageCollector,
                 rootDisposable
             ) {
-                add(CompilerPluginRegistrar.COMPILER_PLUGIN_REGISTRARS, ReplCompilerPluginRegistrar(hostConfiguration))
+                add(CompilerPluginRegistrar.COMPILER_PLUGIN_REGISTRARS, ReplCompilerPluginRegistrar(effectiveHostConfiguration))
             }
 
-            val hostConfigurationWithProvider = hostConfiguration.with {
+            val hostConfigurationWithProvider = effectiveHostConfiguration.with {
                 scriptCompilationConfigurationProvider(SingleScriptCompilationConfigurationProvider(scriptCompilationConfiguration))
                 scriptRefinedCompilationConfigurationsCache(ScriptRefinedCompilationConfigurationCacheImpl())
             }
@@ -258,6 +276,17 @@ class ReplModuleDataProvider(baseLibraryPaths: List<Path>) : ModuleDataProvider(
             friendDependencies = moduleDataHistory.filter { it.dependencies.isNotEmpty() },
             JvmPlatforms.defaultJvmPlatform,
         ).also { moduleDataHistory.add(it) }
+
+    class Snapshot(val moduleDataHistory: List<FirModuleData>, val pathToModuleData: Map<Path, FirModuleData>)
+
+    fun snapshot(): Snapshot = Snapshot(moduleDataHistory.toList(), pathToModuleData.toMap())
+
+    fun restore(snapshot: Snapshot) {
+        moduleDataHistory.clear()
+        moduleDataHistory.addAll(snapshot.moduleDataHistory)
+        pathToModuleData.clear()
+        pathToModuleData.putAll(snapshot.pathToModuleData)
+    }
 }
 
 @OptIn(LegacyK2CliPipeline::class, K1SpecificScriptingServiceAccessor::class, KtNonPublicApi::class, SessionConfiguration::class)
@@ -441,7 +470,6 @@ private fun compileImpl(
         ResultWithDiagnostics.Success(compiledScript, messageCollector.diagnostics)
     }
 }
-
 // Find the appropriate jvm target for the compiler from the ScriptCompilationConfiguration.
 // Since this can be configured in two places, we check if both places agree on the same value (if configured twice).
 // If not, CompilerOptions takes precedence and a warning is reported. We treat CompilerOptions with a higher priority
