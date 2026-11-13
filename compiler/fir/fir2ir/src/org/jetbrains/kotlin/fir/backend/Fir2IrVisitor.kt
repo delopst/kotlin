@@ -1912,8 +1912,15 @@ class Fir2IrVisitor(
         expectedType: ConeKotlinType?,
     ): IrVararg {
         return arrayLiteral.convertWithOffsets { startOffset, endOffset ->
-            val arrayType = (expectedType ?: arrayLiteral.resolvedType).toIrType()
-            val elementType = arrayType.getArrayElementType(builtins)
+            val rawType = expectedType?.toIrType()?.takeIf { it.isArrayTypeForArrayLiteral() }
+                ?: arrayLiteral.resolvedType.toIrType()
+
+            val [arrayType, elementType] = if (rawType.isArrayTypeForArrayLiteral()) {
+                rawType to rawType.getArrayElementType(builtins)
+            } else {
+                builtins.arrayClass.typeWith(rawType) to rawType
+            }
+
             IrVarargImpl(
                 startOffset, endOffset,
                 type = arrayType,
@@ -1922,6 +1929,11 @@ class Fir2IrVisitor(
             )
         }
     }
+
+    private fun IrType.isArrayTypeForArrayLiteral(): Boolean =
+        isArray() || classOrNull?.let {
+            it in builtins.primitiveArrayElementTypes || it in builtins.unsignedArraysElementTypes
+        } == true
 
     override fun visitIndexedAccessAugmentedAssignment(
         indexedAccessAugmentedAssignment: FirIndexedAccessAugmentedAssignment,
